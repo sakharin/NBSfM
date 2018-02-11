@@ -22,6 +22,33 @@ bool NBSfM::CheckParameters(int argc, char * argv[]) {
         return false;
       }
       index += 2;
+    } else if (index + 1 < argc && strcmp(argv[index], "--image_paths") == 0) {
+      num_images_ = 0;
+      image_paths_.clear();
+
+      index += 1;
+      while (index < argc && string(argv[index]).compare(0, 2, "--") != 0) {
+        if (access(argv[index], F_OK) != 0) {
+          cerr << "Cannot read an image : " << argv[index] << "." << endl;
+          return false;
+        }
+        image_paths_.push_back(argv[index]);
+        if (!CheckImage(image_paths_.back())) {
+          cerr << "Cannot read an image : " << argv[index] << "." << endl;
+          return false;
+        }
+        num_images_++;
+        index += 1;
+      }
+    } else if (index + 1 < argc && strcmp(argv[index], "--image_folder") == 0) {
+      image_folder_path_.assign(argv[index + 1]);
+      if (!CheckImageFolder()) {
+        cerr << "Cannot find folder : " << image_folder_path_ << "." << endl;
+        return false;
+      } else {
+        CheckImagesInFolder();
+      }
+      index += 2;
     } else {
       Help(argc, argv);
       return false;
@@ -108,6 +135,8 @@ void NBSfM::Help(int argc, char *argv[]) {
   cout << "Parameters : (a duplicate parameter overrides previous one)" << endl;
   cout << "  Input" << endl;
   cout << "    [--workspace_path workspace_path]" << endl;
+  cout << "    [--image_paths image1_path image2_path [image3_path ...]]" << endl;
+  cout << "    [--image_folder image_folder]" << endl;
 }
 
 inline bool NBSfM::EndsWith(std::string const & value, std::string const & ending) {

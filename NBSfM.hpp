@@ -15,7 +15,7 @@ typedef std::vector<std::string> StringVec;
 class NBSfM {
  private:
   // Parameters ====================
-  // Input
+  // Image input
   string workspace_path_;
   string image_folder_path_;
   int max_num_frames_;
