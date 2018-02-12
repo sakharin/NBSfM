@@ -5,8 +5,14 @@ NBSfM::NBSfM(int argc, char *argv[]) :
     image_folder_path_("./images"),
     video_path_(""),
     max_num_frames_(30),
+
     is_use_images_(false),
-    is_use_video_(false) {
+    is_use_video_(false),
+
+    feature_folder_path_("./features"),
+
+    redo_feature_detection_(false),
+    num_features_(0) {
   if (!CheckParameters(argc, argv)) {
     exit(-1);
   }
@@ -16,7 +22,17 @@ NBSfM::NBSfM(int argc, char *argv[]) :
   if (is_use_video_) {
     ExportVideoFrames();
   }
+
   LoadImages();
+  WriteReferenceImage();
+
+  if (redo_feature_detection_) {
+    FeatureDetection();
+    WriteFeatures();
+  } else {
+    LoadFeatures();
+  }
+  WriteFeatureImage();
 }
 
 bool NBSfM::CheckParameters(int argc, char * argv[]) {
@@ -88,6 +104,12 @@ bool NBSfM::CheckParameters(int argc, char * argv[]) {
       is_use_images_ = false;
       is_use_video_ = true;
       index += 3;
+    } else if (index + 1 < argc && strcmp(argv[index], "--feature_folder") == 0) {
+      feature_folder_path_.assign(argv[index + 1]);
+      if (!CheckFeature()) {
+        return false;
+      }
+      index += 2;
     } else {
       Help(argc, argv);
       return false;
@@ -137,14 +159,16 @@ void NBSfM::ShowParameters() {
   cout << "         image_folder_path : " << image_folder_path_ << endl;
   cout << "            max_num_frames : " << max_num_frames_ << endl;
   }
+  cout << "            feature_folder : " << feature_folder_path_ << endl;
+  cout << endl;
+  cout << "                 Recalculate each step" << endl;
+  cout << "    redo_feature_detection : " << ((redo_feature_detection_) ? "true" : "false") << endl;
 }
 
 bool NBSfM::CheckWorkspace() {
   // Check images
-  bool res;
   image_folder_path_.assign(workspace_path_ + "/images");
-  res = CheckImageFolder();
-  if (res) {
+  if (CheckImageFolder()) {
     CheckImagesInFolder();
     is_use_video_ = false;
     is_use_images_ = true;
@@ -152,6 +176,10 @@ bool NBSfM::CheckWorkspace() {
     num_images_ = 0;
     image_paths_.clear();
   }
+
+  // Check features
+  feature_folder_path_.assign(workspace_path_ + "/features");
+  CheckFeature();
   return true;
 }
 
@@ -210,6 +238,44 @@ bool NBSfM::CheckVideo() {
   return true;
 }
 
+bool NBSfM::CheckFeature() {
+  bool is_can_read = access(feature_folder_path_.c_str(), F_OK | R_OK) == 0;
+  bool is_can_write = access(feature_folder_path_.c_str(), F_OK | W_OK) == 0;
+
+  if (is_can_read) {
+    // Try to read feature files
+    num_features_ = 0;
+    feature_paths_.clear();
+
+    StringVec str_vec;
+    ReadDirectory(feature_folder_path_, str_vec);
+    sort(str_vec.begin(), str_vec.end());
+
+    int feature_count = 0;
+    for (unsigned int i = 0; i < str_vec.size(); i++) {
+      if (EndsWith(str_vec[i], ".csv")) {
+        feature_paths_.push_back(feature_folder_path_ + "/" + str_vec[i]);
+        feature_count++;
+      }
+    }
+
+    if (feature_count != num_images_) {
+      if (is_can_write) {
+        // Redo feature detection
+        num_features_ = 0;
+        feature_paths_.clear();
+        redo_feature_detection_ = true;
+      } else {
+        cerr << "Need to detect features but cannot write features to feature_folder : " << feature_folder_path_ << endl;
+        return false;
+      }
+    }
+  } else {
+    redo_feature_detection_ = true;
+  }
+  return true;
+}
+
 void NBSfM::Help(int argc, char *argv[]) {
   cout << "Usage : " << argv[0] << " [Parameters]" << endl;
   cout << "Parameters : (a duplicate parameter overrides previous one)" << endl;
@@ -218,6 +284,10 @@ void NBSfM::Help(int argc, char *argv[]) {
   cout << "    [--image_paths image1_path image2_path [image3_path ...]]" << endl;
   cout << "    [--image_folder image_folder]" << endl;
   cout << "    [--video video_path image_folder_path [max_num_frames]]" << endl;
+  cout << "    [--feature_folder feature_folder]" << endl;
+  cout << endl;
+  cout << "  Recalculate each step. The following steps will be calculated also." << endl;
+  cout << "    [--redo_feature_detection]" << endl;
 }
 
 inline bool NBSfM::EndsWith(std::string const & value, std::string const & ending) {
@@ -242,6 +312,53 @@ bool NBSfM::MakeDir(string path) {
   if (-1 == dir_err) {
     cerr << "Error creating directory!n";
     return false;
+  }
+  return true;
+}
+
+vector< vector < string > > NBSfM::ReadCSV(string csv_path) {
+  vector< vector < string > > data_list;
+  string line = "";
+
+  ifstream file(csv_path);
+  while (getline(file, line)) {
+    vector< string > vec;
+    istringstream ss(line);
+    while (ss) {
+      string elem;
+      if (!getline(ss, elem, ','))
+        break;
+      try {
+        vec.push_back(elem);
+      }
+      catch (const std::invalid_argument e) {
+        e.what();
+      }
+    }
+    data_list.push_back(vec);
+  }
+  file.close();
+  return data_list;
+}
+
+bool NBSfM::CSVStr2Mat(vector< vector < string > > data, Mat& mat) {
+  // Check size
+  unsigned int rows = data.size();
+  if (rows <= 0)
+    return false;
+  unsigned int cols = data[0].size();
+  for (unsigned int idx = 1; idx < rows; idx++) {
+    if (cols != data[idx].size()) {
+      return false;
+    }
+  }
+
+  // Store data
+  mat = Mat::zeros(rows, cols, CV_64F);
+  for (unsigned int r = 0; r < rows; r++) {
+    for (unsigned int c = 0; c < cols; c++) {
+      mat.at<double>(r, c) = stof(data[r][c]);
+    }
   }
   return true;
 }
@@ -280,7 +397,7 @@ bool NBSfM::ExportVideoFrames() {
 }
 
 bool NBSfM::LoadImages() {
-  cout << endl << endl << "Load Images.." << endl;
+  cout << endl << endl << "Load images.." << endl;
   int img_idx = 0;
   for (auto image_path : image_paths_) {
     cv::Mat img = cv::imread(image_path, CV_LOAD_IMAGE_COLOR);
@@ -299,6 +416,95 @@ bool NBSfM::LoadImages() {
     cout << "  " << img_idx + 1 << " / " << num_images_ << endl;
     img_idx++;
   }
+  return true;
+}
+
+bool NBSfM::WriteReferenceImage() {
+  cout << endl << endl << "Write reference frame.." << endl;
+  imwrite(workspace_path_ + "/ReferenceImage.png", images_.at(0));
+  return true;
+}
+
+bool NBSfM::LoadFeatures() {
+  cout << endl << endl << "Load features.." << endl;
+  num_features_ = 0;
+
+  int feature_count = 0;
+  for (auto feature_path : feature_paths_) {
+    vector< vector < string > > data_i = ReadCSV(feature_path);
+    Mat features_i;
+    CSVStr2Mat(data_i, features_i);
+
+    if (feature_count == 0) {
+      num_features_ = features_i.cols;
+      features_ = Mat::zeros(2 * num_images_, num_features_, CV_64F);
+    }
+    features_i.rowRange(0, 2).copyTo(features_.rowRange(feature_count * 2, feature_count * 2 + 2));
+    feature_count++;
+  }
+
+  if (feature_count != num_images_) {
+    return false;
+  }
+  num_features_ = feature_count;
+  return true;
+}
+
+bool NBSfM::FeatureDetection() {
+  cout << endl << endl << "Feature detection.." << endl;
+  Mat image_ref = images_.at(0);
+  Mat gray_ref;
+  cvtColor(image_ref, gray_ref, CV_RGB2GRAY);
+
+  vector< Point2f > feature_ref;
+  goodFeaturesToTrack(gray_ref, feature_ref, 20000, 1e-10, 5, noArray(), 10);
+  num_features_ = feature_ref.size();
+
+  features_ = Mat::zeros(2, num_features_, CV_64F);
+  for (int i = 0; i < num_features_; i++) {
+    features_.at< double >(0, i) = feature_ref[i].x;
+    features_.at< double >(1, i) = feature_ref[i].y;
+  }
+  return true;
+}
+
+bool NBSfM::WriteFeatures() {
+  cout << endl << endl << "Write feature.." << endl;
+
+  if (access(feature_folder_path_.c_str(), F_OK | W_OK) != 0) {
+    // Make directory
+    MakeDir(feature_folder_path_);
+  } else {
+    // Delete old features
+    string cmd = "rm " + feature_folder_path_ + "/*.csv";
+    system(cmd.c_str());
+  }
+
+  // Write csv
+  ofstream file(feature_folder_path_ + "/reference.csv");
+  file << features_.at<double>(0, 0);
+  for (int i = 1; i < num_features_; i++) {
+    file << "," << features_.at<double>(0, i);
+  }
+  file << endl;
+  file << features_.at<double>(1, 0);
+  for (int i = 1; i < num_features_; i++) {
+    file << "," << features_.at<double>(1, i);
+  }
+  file.close();
+  return true;
+}
+
+bool NBSfM::WriteFeatureImage() {
+  Mat img;
+  images_.at(0).copyTo(img);
+
+  for (int i = 0; i < num_features_; i++) {
+    circle(img,
+           Point(features_.at< double >(0, i), features_.at< double >(1, i)),
+           1, Scalar( 0, 0, 255 ), -1);
+  }
+  imwrite(workspace_path_ + "/FeatureImage.png", img);
   return true;
 }
 
