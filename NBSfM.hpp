@@ -11,6 +11,7 @@ using namespace std;
 using namespace cv;
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <dirent.h>
 typedef std::vector<std::string> StringVec;
 
@@ -20,6 +21,7 @@ class NBSfM {
   // Image input
   string workspace_path_;
   string image_folder_path_;
+  vector< string > image_names_;
   vector< string > image_paths_;
   int num_images_;
 
@@ -33,9 +35,11 @@ class NBSfM {
 
   // Feature input
   string feature_folder_path_;
+  string matched_feature_folder_path_;
 
   // Each step
   bool redo_feature_detection_;
+  bool redo_feature_matching_;
   // Parameters ====================
 
   // Data ==========================
@@ -48,17 +52,21 @@ class NBSfM {
   vector< string > feature_paths_;
   Mat features_;
   int num_features_;
+
+  // Matched features
+  vector< string > matched_feature_paths_;
+  Mat matched_features_;
+  int num_matched_features_;
   // Data ==========================
 
   // Parameter functions  ==========
   bool CheckParameters(int argc, char * argv[]);
   void ShowParameters();
   bool CheckWorkspace();
-  bool CheckImageFolder();
   bool CheckImage(string image_name);
   bool CheckImagesInFolder();
-  bool CheckVideo();
-  bool CheckFeature();
+  bool CheckFeatures();
+  bool CheckMatchedFeatures();
   void Help(int argc, char *argv[]);
   // Parameter functions  ==========
 
@@ -66,17 +74,27 @@ class NBSfM {
   inline bool EndsWith(std::string const & value, std::string const & ending);
   void ReadDirectory(const std::string& name, StringVec& v);
   bool MakeDir(string path);
+  bool IsFolderExist(string path);
+  bool IsFileReadable(string path);
+  bool IsFileWritable(string path);
   vector< vector < string > > ReadCSV(string csv_path);
   bool CSVStr2Mat(vector< vector < string > > data, Mat& mat);
+  string GetNameFromPath(string path);
   // Helper functions ==============
 
   // 3D reconstruction functions ===
   bool ExportVideoFrames();
   bool LoadImages();
   bool WriteReferenceImage();
+
   bool LoadFeatures();
   bool FeatureDetection();
   bool WriteFeatures();
+
+  bool LoadMatchedFeatures();
+  bool FeatureMatching();
+  bool WriteMatchedFeatures();
+
   bool WriteFeatureImage();
   // 3D reconstruction functions ===
 
